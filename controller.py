@@ -1,23 +1,24 @@
 from typing import Union
 
-from pygatt import BLEDevice
+from bleak import BleakClient
 from dataclasses import dataclass
 
 
 @dataclass
 class Controller:
-	""" GATT BLE device controller class """
-	device: BLEDevice
-	write_handle: Union[int, str]
-	uuid_char: str = None
+	""" BleakClient controller class """
+	client: BleakClient
+	uuid_char: str
+	write_handle: Union[int, str] = None
 
 	def __post_init__(self):
-		self.write_handle = int(self.write_handle, 16)
+		if self.write_handle:
+			self.write_handle = int(self.write_handle, 16)
 
-	def send_cmd_handle(self, cmd_str):
+	async def send_cmd_handle(self, cmd_str):
 		cmd_bytes = bytearray.fromhex(cmd_str)
-		self.device.char_write_handle(self.write_handle, cmd_bytes, wait_for_response=False)
+		await self.client.write_gatt_descriptor(self.write_handle, cmd_bytes)
 
-	def send_cmd_char(self, cmd_str):
+	async def send_cmd_char(self, cmd_str):
 		cmd_bytes = bytearray.fromhex(cmd_str)
-		self.device.char_write(self.uuid_char, cmd_bytes, wait_for_response=False)
+		await self.client.write_gatt_char(self.uuid_char, cmd_bytes)

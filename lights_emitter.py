@@ -25,7 +25,7 @@ class LightsEmitter():
                 # reducing light intensity exponentially
                 # color_prev = color
                 color = np.array([int(c**0.5)+1 for c in color])
-                self.controller.send_cmd_char(set_rgb_color(*color))
+                await self.controller.send_cmd_char(set_rgb_color(*color))
                 # for vals in np.column_stack([np.linspace(color[i], color_prev[i], 30, dtype=int) for i in range(3)]):
                 #     self.controller.send_cmd(set_rgb_color(*vals))
                     # if np.random.randint(1, 5) == 3:
