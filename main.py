@@ -1,5 +1,7 @@
 import subprocess
 import asyncio
+import threading as t
+import signal
 import cmds
 
 from controller import Controller
@@ -10,6 +12,17 @@ import numpy as np
 
 from lights_emitter import LightsEmitter
 from logger import LOGGER
+
+
+import argparse
+
+from madmom.audio import SignalProcessor
+from madmom.features import (ActivationsProcessor, DBNBeatTrackingProcessor,
+                             RNNBeatProcessor)
+from madmom.io import write_beats
+from madmom.ml.nn import NeuralNetworkEnsemble
+from madmom.processors import IOProcessor, io_arguments
+
 
 DEVICE_ADDR = 'BE:FF:E5:00:5D:95'
 WRITE_HANDLE = '0008'
@@ -24,38 +37,41 @@ async def test_run_lights(controller):
 			await controller.send_cmd_char(cmds.set_rgb_color(*vals))
 
 
-async def beats_producer(queue):
-	process = await asyncio.create_subprocess_shell('DBNBeatTracker online', stdout=subprocess.PIPE)
-	while True:
-		# await asyncio.sleep(0)
-		line = await process.stdout.readline()
-		if line:
-			l_str = line.decode('utf-8')
-			await queue.put(l_str)
-			await asyncio.sleep(0)
-			LOGGER.info(l_str)
+# async def beats_producer(queue, loop):
+# 	process = await asyncio.create_subprocess_shell('DBNBeatTracker online', stdout=subprocess.PIPE)
+# 	while True:
+# 		# await asyncio.sleep(0)
+# 		line = await process.stdout.readline()
+# 		if line:
+# 			l_str = line.decode('utf-8')
+# 			loop.call_soon_threadsafe(queue.put_nowait, l_str)
+# 			LOGGER.info(l_str)
 
-# async def beats_producer(queue):
-# 	process = subprocess.Popen(['DBNBeatTracker', 'online'], stdout=subprocess.PIPE, bufsize=1)
-# 	for line in iter(process.stdout.readline, b''):
-# 		l_str = line.rstrip().decode('utf-8')
-# 		await queue.put(l_str)
-# 		await asyncio.sleep(0)
-# 		LOGGER.info(l_str)
+def beats_producer(event):
+	process = subprocess.Popen(['DBNBeatTracker', 'online'], stdout=subprocess.PIPE, bufsize=1)
+	for line in iter(process.stdout.readline, b''):
+		l_str = line.rstrip().decode('utf-8')
+		event.set()
+		LOGGER.info(l_str)
 
 
-async def main_loop():
+async def main_loop(event):
 	async with BleakClient(DEVICE_ADDR) as client:
 		LOGGER.info(f"Connected: {client.is_connected}")
 		controller = Controller(client, CHAR_UUID)
-		queue = asyncio.Queue(maxsize=1)
 		emitter = LightsEmitter(controller, exp_rate=0.7, init_color=[255, 0, 255])
 		await controller.send_cmd_char(cmds.ON_SWITCH)
 		# await test_run_lights(controller)
-		await asyncio.gather(beats_producer(queue), emitter.pulse_light(queue))
-		# asyncio.ensure_future(lights_sync(emitter))
+		await emitter.pulse_light(event)
+
+
+def run(event):
+	asyncio.run(main_loop(event))
 
 
 
 if __name__ == '__main__':
-	asyncio.run(main_loop())
+	event = t.Event()
+	thread = t.Thread(target=run, args=(event,))
+	thread.start()
+	beats_producer(event)
