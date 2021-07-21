@@ -1,27 +1,18 @@
+import os
 import subprocess
 import asyncio
-import threading as t
+import multiprocessing as mp
 import signal
 import cmds
 
 from controller import Controller
 
-from bleak import BleakClient, BleakScanner
+from bleak import BleakClient
 
 import numpy as np
 
 from lights_emitter import LightsEmitter
 from logger import LOGGER
-
-
-import argparse
-
-from madmom.audio import SignalProcessor
-from madmom.features import (ActivationsProcessor, DBNBeatTrackingProcessor,
-                             RNNBeatProcessor)
-from madmom.io import write_beats
-from madmom.ml.nn import NeuralNetworkEnsemble
-from madmom.processors import IOProcessor, io_arguments
 
 
 DEVICE_ADDR = 'BE:FF:E5:00:5D:95'
@@ -47,15 +38,15 @@ async def test_run_lights(controller):
 # 			loop.call_soon_threadsafe(queue.put_nowait, l_str)
 # 			LOGGER.info(l_str)
 
-def beats_producer(event):
+def beats_producer():
 	process = subprocess.Popen(['DBNBeatTracker', 'online'], stdout=subprocess.PIPE, bufsize=1)
 	for line in iter(process.stdout.readline, b''):
 		l_str = line.rstrip().decode('utf-8')
-		event.set()
 		LOGGER.info(l_str)
+		event.set()
 
 
-async def main_loop(event):
+async def main_loop():
 	async with BleakClient(DEVICE_ADDR) as client:
 		LOGGER.info(f"Connected: {client.is_connected}")
 		controller = Controller(client, CHAR_UUID)
@@ -65,13 +56,13 @@ async def main_loop(event):
 		await emitter.pulse_light(event)
 
 
-def run(event):
-	asyncio.run(main_loop(event))
 
+def run():
+	asyncio.run(main_loop())
 
 
 if __name__ == '__main__':
-	event = t.Event()
-	thread = t.Thread(target=run, args=(event,))
-	thread.start()
-	beats_producer(event)
+	event = mp.Event()
+	lights = mp.Process(target=run)
+	lights.start()
+	beats_producer()
