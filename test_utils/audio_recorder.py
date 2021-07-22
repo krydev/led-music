@@ -55,13 +55,13 @@ audio = pyaudio.PyAudio()
 
 # start Recording
 stream = audio.open(format=FORMAT, channels=CHANNELS,
-                    rate=RATE, input=True,
+                    rate=RATE, input=True, input_device_index=5,
                     frames_per_buffer=CHUNK)
 print("start")
 frames = []
 
 for i in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
-    data = stream.read(CHUNK)
+    data = stream.read(CHUNK, exception_on_overflow = False)
     frames.append(data)
 print("finish")
 # stop Recording
