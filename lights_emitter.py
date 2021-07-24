@@ -16,7 +16,7 @@ class LightsEmitter():
         self.exp_rate = exp_rate
         self.init_color = np.array(init_color, dtype=int)
         self.non_zero_inds = np.where(self.init_color != 0)[0]
-        self.light_values = self._init_light_values(10)
+        self.light_values = self._init_light_values(15)
 
 
     def _init_light_values(self, num_vals):
@@ -26,18 +26,16 @@ class LightsEmitter():
             vals.append(color)
         return np.array(vals)
 
-    async def pulse_light(self, event):
+    async def pulse_light(self, beat_event):
         LOGGER.info("Starting pulsing")
-        await self.controller.send_cmd_char(set_rgb_color(*self.init_color))
-        while True:
-            event.wait()
-            LOGGER.info("Received event signal. Resetting light")
-            event.clear()
-            for color in self.light_values:
-                await self.controller.send_cmd_char(set_rgb_color(*color))
-                LOGGER.info(f"Current color: {color}")
-            # Reversing back
-            for color in self.light_values[-2::-1]:
-                await self.controller.send_cmd_char(set_rgb_color(*color))
-                LOGGER.info(f"Current color: {color}")
-                # time.sleep(0.01)
+        beat_event.wait()
+        LOGGER.info("Received beat_event signal. Resetting light")
+        beat_event.clear()
+        for color in self.light_values:
+            await self.controller.send_cmd_char(set_rgb_color(*color))
+            LOGGER.info(f"Current color: {color}")
+            # # Reversing back
+        for color in self.light_values[-2::-1]:
+            await self.controller.send_cmd_char(set_rgb_color(*color))
+            LOGGER.info(f"Current color: {color}")
+        time.sleep(0)
