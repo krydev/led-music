@@ -1,3 +1,4 @@
+import math
 import os, fcntl
 import subprocess
 import asyncio
@@ -16,7 +17,7 @@ import numpy as np
 
 from lights_emitter import LightsEmitter
 from logger import LOGGER
-
+from microphone import AudioHandler
 
 DEVICE_ADDR = 'BE:FF:E5:00:5D:95'
 CHAR_UUID = '0000fff3-0000-1000-8000-00805f9b34fb'
@@ -35,48 +36,64 @@ CHAR_UUID = '0000fff3-0000-1000-8000-00805f9b34fb'
 # 				break
 # 			await controller.send_cmd_char(cmds.set_rgb_color(*vals))
 
-def beats_producer(beat_event):
-	process = subprocess.Popen(['DBNBeatTracker', 'online'], stdout=subprocess.PIPE, bufsize=0, close_fds=True)
-	pstdout = process.stdout
-	fd = pstdout.fileno()
-	fl = fcntl.fcntl(fd, fcntl.F_GETFL)
-	fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
-	while not process.poll():
-		try:
-			line = process.stdout.readline()
-			l_str = line.rstrip().decode('utf-8')
-			LOGGER.info(l_str)
-			beat_event.set()
-		except IOError:
-			time.sleep(0.02)
+
+def interp_rgb_exp(start: np.array, stop:np.array, exp_rate: float):
+	assert len(start) == len(stop)
+	reverse = False
+	if start.max() < stop.max():
+		reverse = True
+		start, stop = stop, start
+	vals = [start]
+	i = 1
+	init_color = np.copy(start)
+	non_zero_inds = np.where(init_color != 0)[0]
+	while np.all(start[non_zero_inds] > stop[non_zero_inds]):
+		start = (init_color * math.exp(-exp_rate * i)).astype(int)
+		vals.append(start)
+		i+=1
+	vals.append(stop)
+	if reverse:
+		return np.array(vals[-1::-1])
+	return np.array(vals)
+
+def interp_rgb(start: np.array, stop:np.array, size):
+	assert len(start) == len(stop)
+	return np.column_stack([np.linspace(start[i], stop[i], size, dtype=int) for i in range(len(start))])
 
 
-async def main_loop(beat_event, stop_event):
+async def main_loop():
 	async with BleakClient(DEVICE_ADDR) as client:
 		LOGGER.info(f"Connected: {client.is_connected}")
 		controller = Controller(client, CHAR_UUID)
-		init_color = [130, 0, 140]
-		emitter = LightsEmitter(controller, exp_rate=0.4, init_color=init_color)
+		init_color = np.array([100, 0, 100], dtype=np.int)
+		prev_color = init_color
+		# emitter = LightsEmitter(controller, init_color=init_color)
 		await controller.send_cmd_char(cmds.ON_SWITCH)
 		await controller.send_cmd_char(cmds.set_rgb_color(*init_color))
-		# await test_run_lights(controller, beat_event)
-		while not stop_event.is_set():
-			await emitter.pulse_light(beat_event)
 
+		audio = AudioHandler()
+		audio.start()  # open the the stream
+		while (audio.stream.is_active()):
+			data = audio.stream.read(audio.CHUNK, exception_on_overflow=False)
+			# audio.stream.read(audio.stream.get_read_available(), exception_on_overflow=False)
+			t = time.time()
+			onset_strength, beats = audio.callback(data)
+			t = time.time()
+			for beat in beats:
+				new_color = (init_color * onset_strength[beat]).astype(int)
+				if not np.array_equal(new_color, prev_color):
+					print("Detected beat")
+					seq = interp_rgb_exp(np.copy(prev_color), np.copy(new_color), 0.6)
+					for color_vals in seq:
+						print(color_vals)
+						await controller.send_cmd_char(cmds.set_rgb_color(*color_vals))
+					# print("Reversing")
+					# for color_vals in seq[-1::-1]:
+					# 	await controller.send_cmd_char(cmds.set_rgb_color(*color_vals))
+				prev_color = np.copy(new_color)
+		audio.stop()
 
-def run(beat_event, stop_event):
-	asyncio.run(main_loop(beat_event, stop_event))
 
 
 if __name__ == '__main__':
-	stop_event = t.Event()
-	beat_event = t.Event()
-	lights = t.Thread(target=run, args=(beat_event, stop_event))
-	lights.daemon = True
-	lights.start()
-	try:
-		beats_producer(beat_event)
-	except (KeyboardInterrupt, SystemExit):
-		stop_event.set()
-		lights.join()
-
+	asyncio.run(main_loop())
